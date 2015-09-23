@@ -7,7 +7,40 @@
 % along the dimensions 'nCatDim'.
 %
 % 'tsTensor' will be a TensorStack object, which appears like a normal
-% matlab tensor. It can be referenced using normal matlab indexing.
+% matlab tensor. It can be referenced using normal matlab indexing, with
+% some restrictions. All-colon referencing is unrestricted. However, when
+% any subscript contains a non-colon reference, then the dimensions up
+% until and including the concatenated stack dimension 'nCatDim' must be
+% referenced individually. Subsequent dimensions may be wrapped up using
+% partial linear referencing.
+%
+% For example:
+%
+% >> tsTensor = TensorStack(1, ones(3, 3, 3), ones(3, 3, 3))
+%
+% tsTensor = 
+%    6x3x3 TensorStack object.
+%
+% >> size(tsTensor(:))
+%
+% ans = [54 1]
+%
+% >> size(tsTensor(:, :))
+%
+% ans = [3 18]
+%
+% >> tsTensor(12)
+%
+% Error using TensorStack/my_subsref (line 178)
+% *** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [2] must be referenced independently.
+%
+% >> size(tsTensor(2, :))
+%
+% ans = [1 9]
+%
+% >> tsTensor(1, 7)
+%
+% ans = 1
 
 % Author: Dylan Muir <dylan.muir@unibas.ch>
 % Created: July 2015
@@ -101,7 +134,7 @@ classdef TensorStack
          % - Test for valid subscripts
          cellfun(@isvalidsubscript, S.subs);
          
-         % - Re-order reference indices
+         % - Get stack information
          nNumDims = numel(S.subs);
          vnReferencedTensorSize = size(oStack);
          nNumTotalDims = numel(vnReferencedTensorSize);
@@ -119,47 +152,91 @@ classdef TensorStack
             nNumDims = nNumTotalDims;
          end
          
-         % - Check remaining references
-         if (nNumDims == nNumTotalDims)
-            % - Convert colons
-            vbIsColon = cellfun(@iscolon, S.subs);
-            for (nRefDim = find(vbIsColon))
-               S.subs{nRefDim} = 1:vnReferencedTensorSize(nRefDim);
-            end
-            
+         % - Correct for wrapped-up tensor dimensions
+         vnReferencedTensorSize(nNumDims) = prod(vnReferencedTensorSize(nNumDims:end));
+         vnReferencedTensorSize = vnReferencedTensorSize(1:nNumDims);
+         
+         % - Catch "all colon" entire stack referencing
+         vbIsColon = cellfun(@iscolon, S.subs);
+         if (all(vbIsColon))
             % - Allocate return tensor, using buffered data class
-            vnDataSize = cellfun(@nnz, S.subs);
-            tfData = zeros(vnDataSize, oStack.strDataClass);
+            tfData = zeros(size(oStack), oStack.strDataClass);
+            
+            % - Catch linear referencing
+            if (nNumDims == 1)
+               vnReferencedTensorSize(2) = 1;
+            end
             
             % - Loop over sub-tensors, referencing them in turn
             vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
             vnStackStarts = [0 cumsum(vnStackLengths)];
             vnStackEnds = vnStackStarts(2:end);
             vnStackStarts = vnStackStarts(1:end-1)+1;
-            
-            cBaseDataSubs = cellfun(@substodatasubs, S.subs, 'UniformOutput', false);
+         
+            cBaseSubs = repmat({':'}, 1, ndims(oStack));
             
             for (nSubTensor = 1:numel(oStack.ctTensors))
-               % - Work out which indices are within this tensor
-               vbThisTensor = (S.subs{oStack.nStackDim} >= vnStackStarts(nSubTensor)) & ...
-                              (S.subs{oStack.nStackDim} <= vnStackEnds(nSubTensor));
+               % - Map tensor and data subscripts
+               cDataSubs = cBaseSubs;
+               cDataSubs{oStack.nStackDim} = vnStackStarts(nSubTensor):vnStackEnds(nSubTensor);
                
-               if any(vbThisTensor)
-                  % - Map tensor and data subscripts
-                  cTensorSubs = S.subs;
-                  cTensorSubs{oStack.nStackDim} = S.subs{oStack.nStackDim}(vbThisTensor) - vnStackStarts(nSubTensor)+1;
-                  cDataSubs = cBaseDataSubs;
-                  cDataSubs{oStack.nStackDim} = vbThisTensor;
-                  
-                  % - Access sub-tensor data
-                  tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
-               end
+               % - Access sub-tensor data
+               tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cBaseSubs{:});
             end
             
-         else
+            % - Reshape and return data
+            tfData = reshape(tfData, vnReferencedTensorSize);
+            return;
+         end
+         
+         if (nNumDims < nNumTotalDims)
+            % - Only possible if the concatenation dimension preceeds the wrapped-up dimensions
+            if (nNumDims <= oStack.nStackDim)
+               error('TensorStack:badsubscript', ...
+                     '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
+                     oStack.nStackDim);
+            end
+         end
+
+         % - Convert colon referencing
+         for (nRefDim = find(vbIsColon))
+            S.subs{nRefDim} = 1:vnReferencedTensorSize(nRefDim);
+         end
+         
+         % - Check stack references
+         if (any(cellfun(@(s)min(s(:)), S.subs) < 1) || any(cellfun(@(s)max(s(:)), S.subs) > vnReferencedTensorSize))
             error('TensorStack:badsubscript', ...
-                  '*** TensorStack: Only limited referencing styles are supported. You must provide as many subscripts as tensor dimensions.');
-         end         
+                  'Index exceeds matrix dimensions.');
+         end
+         
+         % - Allocate return tensor, using buffered data class
+         vnDataSize = cellfun(@nnz, S.subs);
+         tfData = zeros(vnDataSize, oStack.strDataClass);
+         
+         % - Loop over sub-tensors, referencing them in turn
+         vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
+         vnStackStarts = [0 cumsum(vnStackLengths)];
+         vnStackEnds = vnStackStarts(2:end);
+         vnStackStarts = vnStackStarts(1:end-1)+1;
+         
+         cBaseDataSubs = cellfun(@substodatasubs, S.subs, 'UniformOutput', false);
+         
+         for (nSubTensor = 1:numel(oStack.ctTensors))
+            % - Work out which indices are within this tensor
+            vbThisTensor = (S.subs{oStack.nStackDim} >= vnStackStarts(nSubTensor)) & ...
+               (S.subs{oStack.nStackDim} <= vnStackEnds(nSubTensor));
+            
+            if any(vbThisTensor)
+               % - Map tensor and data subscripts
+               cTensorSubs = S.subs;
+               cTensorSubs{oStack.nStackDim} = S.subs{oStack.nStackDim}(vbThisTensor) - vnStackStarts(nSubTensor)+1;
+               cDataSubs = cBaseDataSubs;
+               cDataSubs{oStack.nStackDim} = vbThisTensor;
+               
+               % - Access sub-tensor data
+               tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
+            end
+         end
       end
       
       
@@ -217,6 +294,11 @@ classdef TensorStack
          nNumElem = prod(size(oStack)); %#ok<PSIZE>
       end
       
+      % ndims - METHOD Overloaded ndims
+      function [nNumDims] = ndims(oStack)
+         nNumDims = numel(size(oStack));
+      end
+      
       % end - METHOD Overloaded end
       function ind = end(obj,k,n)
          szd = size(obj);
@@ -258,6 +340,35 @@ classdef TensorStack
 
          disp(sprintf('   %s <a href="matlab:help TensorStack">TensorStack</a> object. <a href="matlab:methods(''TensorStack'')">Methods</a> <a href="matlab:properties(''TensorStack'')">Properties</a>', strSize)); %#ok<DSPS>
          fprintf(1, '\n');
+      end
+      
+      %% -- Overloaded test functions
+      function bIsNumeric = isnumeric(oStack)
+         bIsNumeric = isnumeric(oStack.ctTensors{1});
+      end
+      
+      function bIsReal = isreal(oStack)
+         bIsReal = isreal(oStack.ctTensors{1});
+      end
+      
+      function bIsLogical = islogical(oStack)
+         bIsLogical = islogical(oStack.ctTensors{1});
+      end
+      
+      function bIsScalar = isscalar(oStack)
+         bIsScalar = numel(oStack) == 1;
+      end
+      
+      function bIsMatrix = ismatrix(oStack)
+         bIsMatrix = ~isscalar(oStack);
+      end
+      
+      function bIsChar = ischar(oStack)
+         bIsChar = ischar(oStack.ctTensors{1});
+      end
+      
+      function bIsNan = isnan(oStack) %#ok<MANU>
+         bIsNan = false;
       end
    end
    
