@@ -203,6 +203,13 @@ classdef TensorStack
             S.subs{nRefDim} = 1:vnReferencedTensorSize(nRefDim);
          end
          
+         % - Catch empty reference
+         vnDataSize = cellfun(@nnz, S.subs);
+         if (prod(vnDataSize) == 0)
+            tfData = zeros(vnDataSize, oStack.strDataClass);
+            return;
+         end
+         
          % - Check stack references
          if (any(cellfun(@(s)min(s(:)), S.subs) < 1) || any(cellfun(@(s)max(s(:)), S.subs) > vnReferencedTensorSize))
             error('TensorStack:badsubscript', ...
@@ -210,7 +217,6 @@ classdef TensorStack
          end
          
          % - Allocate return tensor, using buffered data class
-         vnDataSize = cellfun(@nnz, S.subs);
          tfData = zeros(vnDataSize, oStack.strDataClass);
          
          % - Loop over sub-tensors, referencing them in turn
