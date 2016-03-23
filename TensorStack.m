@@ -51,6 +51,7 @@ classdef TensorStack
       ctTensors;        % - Cell array of sub-tensors
       cvnTensorSizes;   % - Cell array containing buffered sizes
       strDataClass;     % - Buffered data class
+      vnDimsOrder;      % - Internal dimensions order to support permutation
    end
    
    methods
@@ -75,7 +76,7 @@ classdef TensorStack
          
          % - Check that all tensors have the same size (apart from stack dimension)
          cvnCheckDims = oStack.cvnTensorSizes;
-         for (nTensor = 1:numel(cvnCheckDims))
+         for nTensor = 1:numel(cvnCheckDims)
             cvnCheckDims{nTensor}(oStack.nStackDim) = 0;
          end
          
@@ -90,7 +91,10 @@ classdef TensorStack
             error('TensorStack:Arguments', ...
                   '*** TensorStack: All tensors must be of the same numeric class.');
          end
-         
+
+         % - Initialize dimensions order
+         oStack.vnDimsOrder = 1:numel(cvnCheckDims{1});
+
          % -- Store sub-tensors
          oStack.ctTensors = varargin(2:end);
       end
@@ -124,7 +128,7 @@ classdef TensorStack
       end
       
       % subsasgn - Overloaded subsasgn
-      function varargout = subsasgn(~, ~, ~)
+      function varargout = subsasgn(~, ~, ~) %#ok<STOUT>
          error('TensorStack:NotSupported', ...
                '*** TensorStack: Assignment is not supported.');
       end
@@ -241,8 +245,8 @@ classdef TensorStack
             nCurrentIdx = nCurrentIdx + nCatDim;
          end
       end
-      
-      
+
+
       %% -- Overloaded size, numel, end, etc
       % size - METHOD Overloaded size
       function varargout = size(oStack, vnDimensions)
@@ -250,7 +254,10 @@ classdef TensorStack
          vnSize = oStack.cvnTensorSizes{1};
          vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
          vnSize(oStack.nStackDim) = sum(vnStackLengths);
-         
+
+         % - Permute dimensions
+         vnSize = vnSize(oStack.vnDimsOrder);
+
          % - Return specific dimension(s)
          if (exist('vnDimensions', 'var'))
             if (~isnumeric(vnDimensions) || ~all(isreal(vnDimensions)))
@@ -311,31 +318,43 @@ classdef TensorStack
             ind = prod(szd(k:end));
          end
       end
-      
+
       % permute - METHOD Overloaded permute
-      function varargout = permute(varargin) %#ok<*STOUT>
-         error('TensorStack:NotSupported', ...
-               '*** TensorStack: ''permute'' is not supported.');
+      function [oStack] = permute(oStack, vnNewOrder)
+         % - Test permutation indices
+         vnTestedOrder = sort(vnNewOrder(:));
+         nNDims = numel(oStack.vnDimsOrder);
+
+         try
+            validateattributes(vnTestedOrder, {'numeric'}, ...
+                {'positive', 'integer', 'numel', nNDims, 'increasing', '<=', nNDims});
+         catch
+            error('TensorStack:badorder', ...
+                  '*** TensorStack: invalid permutation indices');
+         end
+
+         % - Change dimensions order
+         oStack.vnDimsOrder(1:numel(vnNewOrder)) = oStack.vnDimsOrder(vnNewOrder(:));
       end
-      
-      % permute - METHOD Overloaded ipermute
-      function varargout = ipermute(varargin)
-         error('TensorStack:NotSupported', ...
-               '*** TensorStack: ''ipermute'' is not supported.');
+
+      % ipermute - METHOD Overloaded ipermute function
+      function [oStack] = ipermute(oStack, vnOldOrder)
+         vnNewOrder(vnOldOrder) = 1:numel(vnOldOrder);
+         oStack = permute(oStack, vnNewOrder);
       end
-      
-      % permute - METHOD Overloaded transpose
-      function varargout = transpose(varargin)
+
+      % ctranspose - METHOD Overloaded transpose function
+      function varargout = transpose(varargin) %#ok<STOUT>
          error('TensorStack:NotSupported', ...
                '*** TensorStack: ''transpose'' is not supported.');
       end
-      
-      % permute - METHOD Overloaded ctranspose
-      function varargout = ctranspose(varargin)
+
+      % ctranspose - METHOD Overloaded ctranspose function
+      function varargout = ctranspose(varargin) %#ok<STOUT>
          error('TensorStack:NotSupported', ...
                '*** TensorStack: ''ctranspose'' is not supported.');
       end
-      
+
       %% -- Overloaded disp
       function disp(oStack)
          strSize = strtrim(sprintf('%dx', size(oStack)));
