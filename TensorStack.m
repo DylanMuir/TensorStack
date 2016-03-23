@@ -133,7 +133,7 @@ classdef TensorStack
                '*** TensorStack: Assignment is not supported.');
       end
       
-      % other_subsref - Standard array referencing
+      % my_subsref - Standard array referencing
       function [tfData] = my_subsref(oStack, S)
          % - Retrieving stack size information
          vnRefTensorSize = size(oStack);
@@ -180,7 +180,7 @@ classdef TensorStack
          % - Check stack references
          if any(cellfun(@max, coSubs(~vbIsColon)) > vnWrappedTensorSize(~vbIsColon))
             error('TensorStack:badsubscript', ...
-                  'Index exceeds matrix dimensions.');
+                  '*** TensorStack: Index exceeds matrix dimensions.');
          end
 
          % - Permute data size and indices
@@ -447,8 +447,8 @@ function isvalidsubscript(oRefs)
       end
       
    catch
-      error('MappedTensor:badsubscript', ...
-            '*** MappedTensor: Subscript indices must either be real positive integers or logicals.');
+      error('TensorStack:badsubscript', ...
+            '*** TensorStack: Subscript indices must either be real positive integers or logicals.');
    end
 end
 
