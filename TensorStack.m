@@ -153,6 +153,9 @@ classdef TensorStack
             return
          end
 
+         % - Forbid wrapped-up dimensions for permuted dimensions
+         %TODO
+
          % - Forbid wrapped-up dimensions before the concatenation dimension
          if (nNumDims < numel(vnRefTensorSize)) && (nNumDims <= oStack.nStackDim)
             error('TensorStack:badsubscript', ...
@@ -178,6 +181,18 @@ classdef TensorStack
                   'Index exceeds matrix dimensions.');
          end
 
+         % - Permute data size and indices
+         vnInvOrder(oStack.vnDimsOrder(1:nNumDims)) = 1:nNumDims;
+         vnOrigSize = vnDataSize(vnInvOrder);
+         cOrigSubs = coSubs(vnInvOrder);
+
+         % - Retrieve data from sub-tensors and permute it
+         tfData = oStack.retrieve_part(cOrigSubs, vnOrigSize);
+         tfData = permute(tfData, oStack.vnDimsOrder(1:nNumDims));
+      end
+
+      % retrieve_part - Retrieve part of the stack, using original size
+      function [tfData] = retrieve_part(oStack, cSubs, vnDataSize)
          % - Allocate return tensor, using buffered data class
          tfData = zeros(vnDataSize, oStack.strDataClass);
 
@@ -186,30 +201,30 @@ classdef TensorStack
          nCurrentIdx = 1;
 
          for nSubTensor=1:numel(oStack.ctTensors)
-            nCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
-            nStackEnd = nStackStart + nCatDim - 1;
+            nNCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
+            nStackEnd = nStackStart + nNCatDim - 1;
 
             % - Check if the whole concatenated dimension is retrieved
-            if iscolon(coSubs{oStack.nStackDim})
-               cTensorSubs = coSubs;
-               nElements = nCatDim;
+            if iscolon(cSubs{oStack.nStackDim})
+               cTensorSubs = cSubs;
+               nElements = nNCatDim;
 
             else
                % - Work out which indices are within this tensor
                vbThisTensor = ...
-                  (coSubs{oStack.nStackDim} >= nStackStart) & ...
-                  (coSubs{oStack.nStackDim} <= nStackEnd);
+                  (cSubs{oStack.nStackDim} >= nStackStart) & ...
+                  (cSubs{oStack.nStackDim} <= nStackEnd);
                nElements = nnz(vbThisTensor);
 
                % - Map tensor subscripts
-               cTensorSubs = coSubs;
+               cTensorSubs = cSubs;
                cTensorSubs{oStack.nStackDim} = ...
-                  coSubs{oStack.nStackDim}(vbThisTensor) - nStackStart + 1;
+                  cSubs{oStack.nStackDim}(vbThisTensor) - nStackStart + 1;
             end
 
             if nElements > 0
                % - Map data subscripts
-               cDataSubs = repmat({':'}, 1, nNumDims);
+               cDataSubs = repmat({':'}, 1, numel(cSubs));
                cDataSubs{oStack.nStackDim} = ...
                    nCurrentIdx:(nCurrentIdx + nElements - 1);
 
@@ -225,7 +240,7 @@ classdef TensorStack
       % retrieve_all - Retrieve all data from the stack
       function [tfData] = retrieve_all(oStack)
          % - Allocate return tensor, using buffered data class
-         tfData = zeros(size(oStack), oStack.strDataClass);
+         tfData = zeros(oStack.insize(), oStack.strDataClass);
 
          % - Loop over sub-tensors, referencing them in turn
          nCurrentIdx = 1;
@@ -244,18 +259,25 @@ classdef TensorStack
 
             nCurrentIdx = nCurrentIdx + nCatDim;
          end
+
+         % - Permute dimensions
+         tfData = permute(tfData, oStack.vnDimsOrder);
       end
 
 
       %% -- Overloaded size, numel, end, etc
-      % size - METHOD Overloaded size
-      function varargout = size(oStack, vnDimensions)
-         % - Get tensor stack size
+
+      % insize - Un-manipulated internal size of the tensor
+      function vnSize = insize(oStack)
          vnSize = oStack.cvnTensorSizes{1};
          vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
          vnSize(oStack.nStackDim) = sum(vnStackLengths);
+      end
 
-         % - Permute dimensions
+      % size - METHOD Overloaded size
+      function varargout = size(oStack, vnDimensions)
+         % - Get tensor stack size and permute it
+         vnSize = oStack.insize();
          vnSize = vnSize(oStack.vnDimsOrder);
 
          % - Return specific dimension(s)
