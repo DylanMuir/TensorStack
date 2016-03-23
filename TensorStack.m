@@ -141,16 +141,25 @@ classdef TensorStack
          % - Cleaning input indices (colon or linear indices)
          coSubs = cleansubs(S.subs, vnRefTensorSize);
          nNumDims = numel(coSubs);
+         vbIsColon = cellfun(@iscolon, coSubs);
+
+         % - Output data size, taking into accound wrapped-up tensor dimensions
+         vnWrappedTensorSize = vnRefTensorSize(1:nNumDims);
+         vnWrappedTensorSize(nNumDims) = prod(vnRefTensorSize(nNumDims:end));
+         vnDataSize = vnWrappedTensorSize;
+         vnDataSize(~vbIsColon) = cellfun(@nnz, coSubs(~vbIsColon));
 
          % - Catch "all colon" entire stack referencing
-         vbIsColon = cellfun(@iscolon, coSubs);
          if all(vbIsColon)
             tfData = oStack.retrieve_all();
-            % - Catch linear referencing
-            if nNumDims == 1
-                tfData = reshape(tfData, [], 1);
-            end
+            tfData = reshape(tfData, vnDataSize);
             return
+         end
+
+         % - Catch empty reference
+         if (prod(vnDataSize) == 0)
+            tfData = zeros(vnDataSize, oStack.strDataClass);
+            return;
          end
 
          % - Forbid wrapped-up dimensions for permuted dimensions
@@ -161,18 +170,6 @@ classdef TensorStack
             error('TensorStack:badsubscript', ...
                   '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
                   oStack.nStackDim);
-         end
-
-         % - Output data size, taking into accound wrapped-up tensor dimensions
-         vnWrappedTensorSize = vnRefTensorSize(1:nNumDims);
-         vnWrappedTensorSize(nNumDims) = prod(vnRefTensorSize(nNumDims:end));
-         vnDataSize = vnWrappedTensorSize;
-         vnDataSize(~vbIsColon) = cellfun(@nnz, coSubs(~vbIsColon));
-
-         % - Catch empty reference
-         if (prod(vnDataSize) == 0)
-            tfData = zeros(vnDataSize, oStack.strDataClass);
-            return;
          end
 
          % - Check stack references
