@@ -51,7 +51,10 @@ classdef TensorStack
       ctTensors;        % - Cell array of sub-tensors
       cvnTensorSizes;   % - Cell array containing buffered sizes
       strDataClass;     % - Buffered data class
-      vnDimsOrder;      % - Internal dimensions order to support permutation
+      vnOrigSize;       % - Stack size wo. permutation and reshaping
+      vnSplitSize;      % - Split dimensions size wo. permutation
+      vnSplitDims;      % - Original indices of split dimensions wo. permutation
+      vnDimsOrder;      % - Split dimensions order to support permutation
    end
    
    methods
@@ -91,6 +94,15 @@ classdef TensorStack
             error('TensorStack:Arguments', ...
                   '*** TensorStack: All tensors must be of the same numeric class.');
          end
+
+         % - Initialize stack size
+         oStack.vnOrigSize = oStack.cvnTensorSizes{1};
+         vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
+         oStack.vnOrigSize(oStack.nStackDim) = sum(vnStackLengths);
+
+         % - Initialize split dimensions information
+         oStack.vnSplitSize = oStack.vnOrigSize;
+         oStack.vnSplitDims = 1:numel(cvnCheckDims{1});
 
          % - Initialize dimensions order
          oStack.vnDimsOrder = 1:numel(cvnCheckDims{1});
@@ -171,6 +183,7 @@ classdef TensorStack
          end
 
          % - Forbid wrapped-up dimensions before the concatenation dimension
+         %TODO check for any of nStackDim split
          if (nNumDims < nRefNumDims) && (nNumDims <= oStack.nStackDim)
             error('TensorStack:badsubscript', ...
                   '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
@@ -185,11 +198,33 @@ classdef TensorStack
 
          % - Permute data size and indices
          vnInvOrder(oStack.vnDimsOrder(1:nNumDims)) = 1:nNumDims;
-         vnOrigSize = vnDataSize(vnInvOrder);
-         cOrigSubs = coSubs(vnInvOrder);
+         vnSortedSize = vnDataSize(vnInvOrder);
+         cSortedSubs = coSubs(vnInvOrder);
 
-         % - Retrieve data from sub-tensors and permute it
-         tfData = oStack.retrieve_part(cOrigSubs, vnOrigSize);
+         % - Merge split dimensions
+         nNOrigDims = numel(unique(oStack.vnSplitDims(1:nNumDims)));
+
+         vnMergedSize = zeros(1, nNOrigDims);
+         cMergedSubs = cell(1, nNOrigDims);
+         for ii=1:nNOrigDims
+            vbDimMask = oStack.vnSplitDims(1:nNumDims) == ii;
+            vnDimSortedSize = vnSortedSize(vbDimMask);
+            vnMergedSize(ii) = prod(vnDimSortedSize);
+
+            cDimSubs = cSortedSubs(vbDimMask);
+            if numel(cDimSubs) == 1
+               cMergedSubs{ii} = cDimSubs{1};
+            elseif all(cellfun(@iscolon, cDimSubs))
+               cMergedSubs{ii} = ':';
+            else
+               vnDimIndices = reshape(1:vnMergedSize(ii), vnDimSortedSize);
+               cMergedSubs{ii} = vnDimIndices(cDimSubs{:});
+            end
+         end
+
+         % - Retrieve data from sub-tensors, reshape and permute it
+         tfData = oStack.retrieve_part(cMergedSubs, vnMergedSize);
+         tfData = reshape(tfData, vnSortedSize);
          tfData = permute(tfData, oStack.vnDimsOrder(1:nNumDims));
       end
 
@@ -242,7 +277,7 @@ classdef TensorStack
       % retrieve_all - Retrieve all data from the stack
       function [tfData] = retrieve_all(oStack)
          % - Allocate return tensor, using buffered data class
-         tfData = zeros(oStack.insize(), oStack.strDataClass);
+         tfData = zeros(oStack.vnOrigSize, oStack.strDataClass);
 
          % - Loop over sub-tensors, referencing them in turn
          nCurrentIdx = 1;
@@ -262,25 +297,18 @@ classdef TensorStack
             nCurrentIdx = nCurrentIdx + nCatDim;
          end
 
-         % - Permute dimensions
+         % - Reshape (split) and permute dimensions
+         tfData = reshape(tfData, oStack.vnSplitSize);
          tfData = permute(tfData, oStack.vnDimsOrder);
       end
 
 
       %% -- Overloaded size, numel, end, etc
 
-      % insize - Un-manipulated internal size of the tensor
-      function vnSize = insize(oStack)
-         vnSize = oStack.cvnTensorSizes{1};
-         vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
-         vnSize(oStack.nStackDim) = sum(vnStackLengths);
-      end
-
       % size - METHOD Overloaded size
       function varargout = size(oStack, vnDimensions)
          % - Get tensor stack size and permute it
-         vnSize = oStack.insize();
-         vnSize = vnSize(oStack.vnDimsOrder);
+         vnSize = oStack.vnSplitSize(oStack.vnDimsOrder);
 
          % - Return specific dimension(s)
          if (exist('vnDimensions', 'var'))
@@ -377,6 +405,94 @@ classdef TensorStack
       function varargout = ctranspose(varargin) %#ok<STOUT>
          error('TensorStack:NotSupported', ...
                '*** TensorStack: ''ctranspose'' is not supported.');
+      end
+
+      % reshape - METHOD Overloaded reshape function
+      function [oStack] = reshape(oStack, varargin)
+         % - Get new size input
+         if nargin == 1
+            error('TensorStack:ReshapeMissingSize', ...
+                  '*** TensorStack: Missing new size argument');
+
+         elseif nargin == 2
+            vnNewSize = varargin{1};
+
+         else
+            % - Deal with unknown dimension (1 maximum)
+            vbUnknown = cellfun(@isempty, varargin);
+            nUnknown = find(vbUnknown);
+
+            if length(nUnknown) > 1
+               error('TensorStack:MultipleUnknown', ...
+                     '*** TensorStack: Size can only have one unknown dimension.')
+            elseif length(nUnknown) == 1
+               varargin{nUnknown} = ...
+                  numel(oStack) / prod([varargin{~vbUnknown}]);
+            end
+            vnNewSize = [varargin{:}];
+         end
+
+         % - Check new size input
+         if prod(vnNewSize) ~= numel(oStack)
+            error('TensorStack:badnewsize', ...
+                  '*** TensorStack: The number of elements must not change.');
+         end
+
+         try
+            validateattributes(vnNewSize, {'numeric'}, {'integer', 'positive'});
+         catch
+            error('TensorStack:badnewsize', ...
+                  '*** TensorStack: Size must be a vector of positive integers.');
+         end
+
+         % - Allocate new size information
+         nNumberNewDims = numel(vnNewSize);
+         vnNewSplitDims = zeros(1, nNumberNewDims);
+         vnNewDimsOrder = zeros(1, nNumberNewDims);
+
+         % - Retrieve size and order information before transformation
+         vnSize = size(oStack);
+         vnOldDimsOrder = oStack.vnDimsOrder;
+
+         % - Iteratively allocate old dimensions info to new dimensions
+         nOrderShift = 0;          % shift to apply to get new permutation index
+         nDim = 1;                 % index of current old dimension
+         nCurrDim = vnSize(nDim);  % number of elements in current old dimension
+
+         for ii=1:nNumberNewDims
+            % relate new split dimension to older orginal dimension
+            vnNewSplitDims(ii) = vnOldDimsOrder(nDim);
+            vnNewDimsOrder(ii) = vnOldDimsOrder(nDim) + nOrderShift;
+
+            % try to exhaust elements of older dimension with the new one
+            nCurrDim = nCurrDim / vnNewSize(ii);
+
+            % error if not enough element (merge case)
+            if nCurrDim < 1
+               error('TensorStack:MergedDims', ...
+                     '*** TensorStack: merging dimensions is not supported.');
+
+            % case of complete use of older dimension, switch to next one
+            elseif nCurrDim == 1 && ii < nNumberNewDims
+               nDim = nDim + 1;
+               nCurrDim = vnSize(nDim);
+               nOrderShift = 0;
+
+            % case of new split, with remaining elements in the older dimension
+            else
+               nOrderShift = nOrderShift + 1;
+               vbHigherOrders = vnOldDimsOrder > vnNewDimsOrder(ii);
+               vnOldDimsOrder(vbHigherOrders) = vnOldDimsOrder(vbHigherOrders) + 1;
+            end
+         end
+
+         % - Replace older split dimensions information
+         oStack.vnDimsOrder = vnNewDimsOrder;
+         oStack.vnSplitDims = vnNewSplitDims;
+
+         % - Update split size info, taking into account permutation
+         vnNewSplitSize(vnNewDimsOrder) = vnNewSize;
+         oStack.vnSplitSize = vnNewSplitSize;
       end
 
       %% -- Overloaded disp
