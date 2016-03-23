@@ -129,119 +129,116 @@ classdef TensorStack
                '*** TensorStack: Assignment is not supported.');
       end
       
-      % my_subsref - Standard array referencing
+      % other_subsref - Standard array referencing
       function [tfData] = my_subsref(oStack, S)
-         % - Test for valid subscripts
-         cellfun(@isvalidsubscript, S.subs);
-         
-         % - Get stack information
-         nNumDims = numel(S.subs);
-         vnReferencedTensorSize = size(oStack);
-         nNumTotalDims = numel(vnReferencedTensorSize);
-         
-         % - Check dimensionality and trailing dimensions
-         if (nNumDims > nNumTotalDims)
-            % - Check trailing dimensions
-            if (~all(cellfun(@(c)isequal(c, 1), S.subs(nNumTotalDims+1:end))))
-               error('TensorStack:badsubscript', ...
-                  '*** TensorStack: Index exceds matrix dimensions.');
-            end
-            
-            % - Trim trailing dimensions
-            S.subs = S.subs(1:nNumTotalDims);
-            nNumDims = nNumTotalDims;
-         end
-         
-         % - Correct for wrapped-up tensor dimensions
-         vnReferencedTensorSize(nNumDims) = prod(vnReferencedTensorSize(nNumDims:end));
-         vnReferencedTensorSize = vnReferencedTensorSize(1:nNumDims);
-         
+         % - Retrieving stack size information
+         vnRefTensorSize = size(oStack);
+
+         % - Cleaning input indices (colon or linear indices)
+         coSubs = cleansubs(S.subs, vnRefTensorSize);
+         nNumDims = numel(coSubs);
+
          % - Catch "all colon" entire stack referencing
-         vbIsColon = cellfun(@iscolon, S.subs);
-         if (all(vbIsColon))
-            % - Allocate return tensor, using buffered data class
-            tfData = zeros(size(oStack), oStack.strDataClass);
-            
+         vbIsColon = cellfun(@iscolon, coSubs);
+         if all(vbIsColon)
+            tfData = oStack.retrieve_all();
             % - Catch linear referencing
-            if (nNumDims == 1)
-               vnReferencedTensorSize(2) = 1;
+            if nNumDims == 1
+                tfData = reshape(tfData, [], 1);
             end
-            
-            % - Loop over sub-tensors, referencing them in turn
-            vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
-            vnStackStarts = [0 cumsum(vnStackLengths)];
-            vnStackEnds = vnStackStarts(2:end);
-            vnStackStarts = vnStackStarts(1:end-1)+1;
-         
-            cBaseSubs = repmat({':'}, 1, ndims(oStack));
-            
-            for (nSubTensor = 1:numel(oStack.ctTensors))
-               % - Map tensor and data subscripts
-               cDataSubs = cBaseSubs;
-               cDataSubs{oStack.nStackDim} = vnStackStarts(nSubTensor):vnStackEnds(nSubTensor);
-               
-               % - Access sub-tensor data
-               tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cBaseSubs{:});
-            end
-            
-            % - Reshape and return data
-            tfData = reshape(tfData, vnReferencedTensorSize);
-            return;
-         end
-         
-         if (nNumDims < nNumTotalDims)
-            % - Only possible if the concatenation dimension preceeds the wrapped-up dimensions
-            if (nNumDims <= oStack.nStackDim)
-               error('TensorStack:badsubscript', ...
-                     '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
-                     oStack.nStackDim);
-            end
+            return
          end
 
-         % - Convert colon referencing
-         for (nRefDim = find(vbIsColon))
-            S.subs{nRefDim} = 1:vnReferencedTensorSize(nRefDim);
+         % - Forbid wrapped-up dimensions before the concatenation dimension
+         if (nNumDims < numel(vnRefTensorSize)) && (nNumDims <= oStack.nStackDim)
+            error('TensorStack:badsubscript', ...
+                  '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
+                  oStack.nStackDim);
          end
-         
+
+         % - Output data size, taking into accound wrapped-up tensor dimensions
+         vnWrappedTensorSize = vnRefTensorSize(1:nNumDims);
+         vnWrappedTensorSize(nNumDims) = prod(vnRefTensorSize(nNumDims:end));
+         vnDataSize = vnWrappedTensorSize;
+         vnDataSize(~vbIsColon) = cellfun(@nnz, coSubs(~vbIsColon));
+
          % - Catch empty reference
-         vnDataSize = cellfun(@nnz, S.subs);
          if (prod(vnDataSize) == 0)
             tfData = zeros(vnDataSize, oStack.strDataClass);
             return;
          end
-         
+
          % - Check stack references
-         if (any(cellfun(@(s)min(s(:)), S.subs) < 1) || any(cellfun(@(s)max(s(:)), S.subs) > vnReferencedTensorSize))
+         if any(cellfun(@max, coSubs(~vbIsColon)) > vnWrappedTensorSize(~vbIsColon))
             error('TensorStack:badsubscript', ...
                   'Index exceeds matrix dimensions.');
          end
-         
+
          % - Allocate return tensor, using buffered data class
          tfData = zeros(vnDataSize, oStack.strDataClass);
-         
+
          % - Loop over sub-tensors, referencing them in turn
-         vnStackLengths = cellfun(@(c)c(oStack.nStackDim), oStack.cvnTensorSizes);
-         vnStackStarts = [0 cumsum(vnStackLengths)];
-         vnStackEnds = vnStackStarts(2:end);
-         vnStackStarts = vnStackStarts(1:end-1)+1;
-         
-         cBaseDataSubs = cellfun(@substodatasubs, S.subs, 'UniformOutput', false);
-         
-         for (nSubTensor = 1:numel(oStack.ctTensors))
-            % - Work out which indices are within this tensor
-            vbThisTensor = (S.subs{oStack.nStackDim} >= vnStackStarts(nSubTensor)) & ...
-               (S.subs{oStack.nStackDim} <= vnStackEnds(nSubTensor));
-            
-            if any(vbThisTensor)
-               % - Map tensor and data subscripts
-               cTensorSubs = S.subs;
-               cTensorSubs{oStack.nStackDim} = S.subs{oStack.nStackDim}(vbThisTensor) - vnStackStarts(nSubTensor)+1;
-               cDataSubs = cBaseDataSubs;
-               cDataSubs{oStack.nStackDim} = vbThisTensor;
-               
+         nStackStart = 1;
+         nCurrentIdx = 1;
+
+         for nSubTensor=1:numel(oStack.ctTensors)
+            nCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
+            nStackEnd = nStackStart + nCatDim - 1;
+
+            % - Check if the whole concatenated dimension is retrieved
+            if iscolon(coSubs{oStack.nStackDim})
+               cTensorSubs = coSubs;
+               nElements = nCatDim;
+
+            else
+               % - Work out which indices are within this tensor
+               vbThisTensor = ...
+                  (coSubs{oStack.nStackDim} >= nStackStart) & ...
+                  (coSubs{oStack.nStackDim} <= nStackEnd);
+               nElements = nnz(vbThisTensor);
+
+               % - Map tensor subscripts
+               cTensorSubs = coSubs;
+               cTensorSubs{oStack.nStackDim} = ...
+                  coSubs{oStack.nStackDim}(vbThisTensor) - nStackStart + 1;
+            end
+
+            if nElements > 0
+               % - Map data subscripts
+               cDataSubs = repmat({':'}, 1, nNumDims);
+               cDataSubs{oStack.nStackDim} = ...
+                   nCurrentIdx:(nCurrentIdx + nElements - 1);
+
                % - Access sub-tensor data
                tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
             end
+
+            nStackStart = nStackEnd + 1;
+            nCurrentIdx = nCurrentIdx + nElements;
+         end
+      end
+
+      % retrieve_all - Retrieve all data from the stack
+      function [tfData] = retrieve_all(oStack)
+         % - Allocate return tensor, using buffered data class
+         tfData = zeros(size(oStack), oStack.strDataClass);
+
+         % - Loop over sub-tensors, referencing them in turn
+         nCurrentIdx = 1;
+         cTensorSubs = repmat({':'}, 1, ndims(oStack));
+
+         for nSubTensor=1:numel(oStack.ctTensors)
+            nCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
+
+            % - Map data subscripts
+            cDataSubs = cTensorSubs;
+            cDataSubs{oStack.nStackDim} = ...
+               nCurrentIdx:(nCurrentIdx + nCatDim - 1);
+
+            % - Access sub-tensor data
+            tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
+
+            nCurrentIdx = nCurrentIdx + nCatDim;
          end
       end
       
@@ -412,10 +409,29 @@ function isvalidsubscript(oRefs)
    end
 end
 
-function vDataSubs = substodatasubs(vSubs)
-   if islogical(vSubs)
-      vDataSubs = 1:nnz(vSubs);
-   else
-      vDataSubs = 1:numel(vSubs);
-   end
+function coCleanSubs = cleansubs(coSubs, vnTensorSize)
+    % - Test for valid subscripts
+    cellfun(@isvalidsubscript, coSubs);
+
+    % - Get stack information
+    nNumDims = numel(vnTensorSize);
+
+    % - Check dimensionality
+    if any(cellfun(@(c)c ~= 1, coSubs(nNumDims+1:end)))
+       error('TensorStack:badsubscript', ...
+             '*** TensorStack: Index exceds matrix dimensions.');
+    end
+
+    % - Trim trailing dimensions
+    coCleanSubs = coSubs(1:min(numel(coSubs), nNumDims));
+
+    % - Convert logical indices to linear indices
+    for ii=1:numel(coCleanSubs)
+       if islogical(coCleanSubs{ii})
+           coCleanSubs{ii} = find(coCleanSubs{ii});
+       end
+    end
+
+    % - Flatten indices arrays
+    coCleanSubs = cellfun(@(c) c(:), coCleanSubs, 'un', false);
 end
