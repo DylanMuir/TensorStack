@@ -203,23 +203,27 @@ classdef TensorStack
 
          % - Merge split dimensions
          nNOrigDims = numel(unique(oStack.vnSplitDims(1:nNumDims)));
-
          vnMergedSize = zeros(1, nNOrigDims);
          cMergedSubs = cell(1, nNOrigDims);
+
          for ii=1:nNOrigDims
+            % number of retrieved elements in the original (merged) dimension
             vbDimMask = oStack.vnSplitDims(1:nNumDims) == ii;
             vnDimSortedSize = vnSortedSize(vbDimMask);
             vnMergedSize(ii) = prod(vnDimSortedSize);
 
+            % indices in the original (merged) dimension
             cDimSubs = cSortedSubs(vbDimMask);
             if numel(cDimSubs) == 1
                cMergedSubs{ii} = cDimSubs{1};
             elseif all(cellfun(@iscolon, cDimSubs))
                cMergedSubs{ii} = ':';
             else
-               vnDimIndices = reshape(1:vnMergedSize(ii), vnDimSortedSize);
-               cMergedSubs{ii} = vnDimIndices(cDimSubs{:});
+               vnDimIndices = reshape(1:oStack.vnOrigSize(ii), ...
+                  oStack.vnSplitSize(vbDimMask));
+               cMergedSubs{ii} = reshape(vnDimIndices(cDimSubs{:}), [], 1);
             end
+            %TODO linear indexing case ?
          end
 
          % - Retrieve data from sub-tensors, reshape and permute it
@@ -445,24 +449,17 @@ classdef TensorStack
                   '*** TensorStack: Size must be a vector of positive integers.');
          end
 
-         % - Allocate new size information
+         % - Iteratively allocate old dimensions info to new dimensions
          nNumberNewDims = numel(vnNewSize);
-         vnNewSplitDims = zeros(1, nNumberNewDims);
          vnNewDimsOrder = zeros(1, nNumberNewDims);
 
-         % - Retrieve size and order information before transformation
-         vnSize = size(oStack);
-         vnOldDimsOrder = oStack.vnDimsOrder;
-
-         % - Iteratively allocate old dimensions info to new dimensions
-         nOrderShift = 0;          % shift to apply to get new permutation index
+         vnSize = size(oStack);    % current stack size
          nDim = 1;                 % index of current old dimension
          nCurrDim = vnSize(nDim);  % number of elements in current old dimension
 
          for ii=1:nNumberNewDims
             % relate new split dimension to older orginal dimension
-            vnNewSplitDims(ii) = vnOldDimsOrder(nDim);
-            vnNewDimsOrder(ii) = vnOldDimsOrder(nDim) + nOrderShift;
+            vnNewDimsOrder(ii) = oStack.vnDimsOrder(nDim);
 
             % try to exhaust elements of older dimension with the new one
             nCurrDim = nCurrDim / vnNewSize(ii);
@@ -476,19 +473,21 @@ classdef TensorStack
             elseif nCurrDim == 1 && ii < nNumberNewDims
                nDim = nDim + 1;
                nCurrDim = vnSize(nDim);
-               nOrderShift = 0;
-
-            % case of new split, with remaining elements in the older dimension
-            else
-               nOrderShift = nOrderShift + 1;
-               vbHigherOrders = vnOldDimsOrder > vnNewDimsOrder(ii);
-               vnOldDimsOrder(vbHigherOrders) = vnOldDimsOrder(vbHigherOrders) + 1;
             end
          end
 
-         % - Replace older split dimensions information
+         % - Deduce splits to apply to each dimensions
+         oStack.vnSplitDims = sort(oStack.vnSplitDims(vnNewDimsOrder));
+
+         % - Assign new permutation order to newly split dimensions
+         for ii=2:nNumberNewDims
+            if vnNewDimsOrder(ii) == vnNewDimsOrder(ii - 1)
+               vbOrders = vnNewDimsOrder > vnNewDimsOrder(ii);
+               vnNewDimsOrder(ii) = vnNewDimsOrder(ii) + 1;
+               vnNewDimsOrder(vbOrders) = vnNewDimsOrder(vbOrders) + 1;
+            end
+         end
          oStack.vnDimsOrder = vnNewDimsOrder;
-         oStack.vnSplitDims = vnNewSplitDims;
 
          % - Update split size info, taking into account permutation
          vnNewSplitSize(vnNewDimsOrder) = vnNewSize;
