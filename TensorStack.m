@@ -137,6 +137,7 @@ classdef TensorStack
       function [tfData] = my_subsref(oStack, S)
          % - Retrieving stack size information
          vnRefTensorSize = size(oStack);
+         nRefNumDims = numel(vnRefTensorSize);
 
          % - Cleaning input indices (colon or linear indices)
          coSubs = cleansubs(S.subs, vnRefTensorSize);
@@ -163,10 +164,14 @@ classdef TensorStack
          end
 
          % - Forbid wrapped-up dimensions for permuted dimensions
-         %TODO
+         vbPermutedDims = 1:numel(oStack.vnDimsOrder) ~= oStack.vnDimsOrder;
+         if (nNumDims < nRefNumDims) && any(vbPermutedDims(nNumDims:end))
+            error('TensorStack:badsubscript', ...
+                  '*** TensorStack: Only limited referencing styles are supported. Permuted dimensions cannot be linearly indexed.');
+         end
 
          % - Forbid wrapped-up dimensions before the concatenation dimension
-         if (nNumDims < numel(vnRefTensorSize)) && (nNumDims <= oStack.nStackDim)
+         if (nNumDims < nRefNumDims) && (nNumDims <= oStack.nStackDim)
             error('TensorStack:badsubscript', ...
                   '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
                   oStack.nStackDim);
