@@ -165,7 +165,7 @@ classdef TensorStack
          % - Catch "all colon" entire stack referencing
          if all(vbIsColon)
             tfData = oStack.retrieve_all();
-            tfData = reshape(tfData, vnDataSize);
+            tfData = reshape(tfData, [vnDataSize, 1]);
             return
          end
 
@@ -223,7 +223,6 @@ classdef TensorStack
                   oStack.vnSplitSize(vbDimMask));
                cMergedSubs{ii} = reshape(vnDimIndices(cDimSubs{:}), [], 1);
             end
-            %TODO linear indexing case ?
          end
 
          % - Retrieve data from sub-tensors, reshape and permute it
@@ -313,6 +312,9 @@ classdef TensorStack
       function varargout = size(oStack, vnDimensions)
          % - Get tensor stack size and permute it
          vnSize = oStack.vnSplitSize(oStack.vnDimsOrder);
+
+         % - Remove trailing 1's
+         vnSize = vnSize(1:find(vnSize ~= 1, 1, 'last'));
 
          % - Return specific dimension(s)
          if (exist('vnDimensions', 'var'))
@@ -449,6 +451,9 @@ classdef TensorStack
                   '*** TensorStack: Size must be a vector of positive integers.');
          end
 
+         % - Remove trailing ones
+         vnNewSize = vnNewSize(1:find(vnNewSize ~= 1, 1, 'last'));
+
          % - Iteratively allocate old dimensions info to new dimensions
          nNumberNewDims = numel(vnNewSize);
          vnNewDimsOrder = zeros(1, nNumberNewDims);
@@ -482,8 +487,8 @@ classdef TensorStack
          % - Assign new permutation order to newly split dimensions
          for ii=2:nNumberNewDims
             if vnNewDimsOrder(ii) == vnNewDimsOrder(ii - 1)
-               vbOrders = vnNewDimsOrder > vnNewDimsOrder(ii);
-               vnNewDimsOrder(ii) = vnNewDimsOrder(ii) + 1;
+               vbOrders = vnNewDimsOrder >= vnNewDimsOrder(ii);
+               vbOrders(ii - 1) = false;
                vnNewDimsOrder(vbOrders) = vnNewDimsOrder(vbOrders) + 1;
             end
          end
