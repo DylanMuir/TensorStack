@@ -183,8 +183,8 @@ classdef TensorStack
          end
 
          % - Forbid wrapped-up dimensions before the concatenation dimension
-         %TODO check for any of nStackDim split
-         if (nNumDims < nRefNumDims) && (nNumDims <= oStack.nStackDim)
+         nLastStackDim = find(oStack.vnSplitDims == oStack.nStackDim, 1, 'last');
+         if (nNumDims < nRefNumDims) && (nNumDims <= nLastStackDim)
             error('TensorStack:badsubscript', ...
                   '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
                   oStack.nStackDim);

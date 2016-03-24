@@ -45,7 +45,7 @@ classdef TestTensorStack < matlab.unittest.TestCase
             'split4', [3, 2, 2, 3, 5], ...
             'split5', [3, 3, 2, 2, 5]);
         % seeds for random permutations
-        permseed = {1, 22, 542, 445, 55324, 356};
+        permseed = {1, 22, 542, 445, 5534, 356, 34, 123};
         % tested splits for concatenated dimension (== 12)
         splits = { ...
             [2, 6], [6, 2], [3, 4], [4, 3], [2, 2, 3], [3, 2, 2], [2, 3, 2]};
@@ -172,6 +172,27 @@ classdef TestTensorStack < matlab.unittest.TestCase
             psubs = splitsubs(rorder);
 
             testCase.verifyEqual(pstack(psubs{:}), preal(psubs{:}));
+        end
+
+        % test limited linear indexing
+        function testForbiddenLinear1(testCase)
+            % illegal linear indexing if concatenated dimension is used
+            testCase.verifyError(@() testCase.stack(:, 3), ...
+                                 'TensorStack:badsubscript');
+        end
+
+        % test limited linear indexing
+        function testForbiddenLinear2(testCase)
+            % permute dimensions to get illegal linear indexing
+            pstack = permute(testCase.stack, [2, 1, 3]);
+            testCase.verifyError(@() pstack(:, 3), 'TensorStack:badsubscript');
+        end
+
+        % test limited linear indexing
+        function testForbiddenLinear3(testCase)
+            % reshape stack to get another illegal linear indexing
+            rstack = reshape(testCase.stack, [1, 1, 1, 3, 12, 5]);
+            testCase.verifyError(@() rstack(:, :, :, 3), 'TensorStack:badsubscript');
         end
     end
 end
