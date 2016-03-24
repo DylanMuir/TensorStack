@@ -21,7 +21,7 @@ classdef TestTensorStack < matlab.unittest.TestCase
             'part3', {{1:3, ':', ':'}}, ...
             'part4', {{1:3, ':', 4:5}}, ...
             'part5', {{1:3, 3, 4:5}}, ...
-            'part6', {{':', 3:end, 4:5}}, ...
+            'part6', {{':', 3:12, 4:5}}, ...
             'part7', {{':', [3, 1, 2], ':'}});
         % tested permutations
         order = struct( ...
@@ -30,7 +30,7 @@ classdef TestTensorStack < matlab.unittest.TestCase
             'invert1', [2, 1, 3], ...
             'invert2', [1, 3, 2], ...
             'shuffle', [2, 3, 1]);
-        % tested new size for reshaping (split only)
+        % tested new sizes for reshaping (split only)
         newsize = struct( ...
             'unchanged', [3, 12, 5], ...
             'unknown1', {{3, [], 5}}, ...
@@ -44,11 +44,18 @@ classdef TestTensorStack < matlab.unittest.TestCase
             'split3', [3, 4, 3, 5], ...
             'split4', [3, 2, 2, 3, 5], ...
             'split5', [3, 3, 2, 2, 5]);
-        % seed for random permutations
-        permseed = {1, 22, 542, 445, 55324};
-        % tested splits for 12
+        % seeds for random permutations
+        permseed = {1, 22, 542, 445, 55324, 356};
+        % tested splits for concatenated dimension (== 12)
         splits = { ...
             [2, 6], [6, 2], [3, 4], [4, 3], [2, 2, 3], [3, 2, 2], [2, 3, 2]};
+        % tested indexing schemas for split stack as [3, 3, 4, 5]
+        splitsubs = { ...
+            {':', 1:2, ':', ':'}, ...
+            {':', ':', 1:4, ':'}, ...
+            {2:3, ':', 1:3, ':'}, ...
+            {2:3, ':', 1:3, 5}, ...
+            {[1, 3], 2, 1:3, 5}};
     end
 
     methods (TestMethodSetup)
@@ -124,6 +131,7 @@ classdef TestTensorStack < matlab.unittest.TestCase
             testCase.verifySize(ppstack, size(rreal));
             testCase.verifyEqual(ppstack(colons{:}), rreal);
         end
+
         % test permutation + reshape
         function testPermuteReshape(testCase, order, splits)
             % permutation
@@ -141,6 +149,29 @@ classdef TestTensorStack < matlab.unittest.TestCase
             colons = repmat({':'}, ndims(rreal), 1);
             testCase.verifySize(rstack, size(rreal));
             testCase.verifyEqual(rstack(colons{:}), rreal);
+        end
+
+        % test regular indexing of split stack
+        function testReshapeSubsref(testCase, splitsubs)
+            rstack = reshape(testCase.stack, [3, 3, 4, 5]);
+            rreal = reshape(testCase.real_stack, [3, 3, 4, 5]);
+            testCase.verifyEqual(rstack(splitsubs{:}), rreal(splitsubs{:}));
+        end
+
+        % test regular indexing of split/permuted stack
+        function testReshapePermSubsref(testCase, permseed, splitsubs)
+            % reshape stack
+            rstack = reshape(testCase.stack, [3, 3, 4, 5]);
+            rreal = reshape(testCase.real_stack, [3, 3, 4, 5]);
+
+            % random permutation
+            rng(permseed)
+            rorder = randperm(ndims(rreal));
+            pstack = permute(rstack, rorder);
+            preal = permute(rreal, rorder);
+            psubs = splitsubs(rorder);
+
+            testCase.verifyEqual(pstack(psubs{:}), preal(psubs{:}));
         end
     end
 end
