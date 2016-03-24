@@ -144,167 +144,6 @@ classdef TensorStack
          error('TensorStack:NotSupported', ...
                '*** TensorStack: Assignment is not supported.');
       end
-      
-      % my_subsref - Standard array referencing
-      function [tfData] = my_subsref(oStack, S)
-         % - Retrieving stack size information
-         vnRefTensorSize = size(oStack);
-         nRefNumDims = numel(vnRefTensorSize);
-
-         % - Cleaning input indices (colon or linear indices)
-         coSubs = cleansubs(S.subs, vnRefTensorSize);
-         nNumDims = numel(coSubs);
-         vbIsColon = cellfun(@iscolon, coSubs);
-
-         % - Output data size, taking into accound wrapped-up tensor dimensions
-         vnWrappedTensorSize = vnRefTensorSize(1:nNumDims);
-         vnWrappedTensorSize(nNumDims) = prod(vnRefTensorSize(nNumDims:end));
-         vnDataSize = vnWrappedTensorSize;
-         vnDataSize(~vbIsColon) = cellfun(@nnz, coSubs(~vbIsColon));
-
-         % - Catch "all colon" entire stack referencing
-         if all(vbIsColon)
-            tfData = oStack.retrieve_all();
-            tfData = reshape(tfData, [vnDataSize, 1]);
-            return
-         end
-
-         % - Catch empty reference
-         if (prod(vnDataSize) == 0)
-            tfData = zeros(vnDataSize, oStack.strDataClass);
-            return;
-         end
-
-         % - Forbid wrapped-up dimensions for permuted dimensions
-         vbPermutedDims = 1:numel(oStack.vnDimsOrder) ~= oStack.vnDimsOrder;
-         if (nNumDims < nRefNumDims) && any(vbPermutedDims(nNumDims:end))
-            error('TensorStack:badsubscript', ...
-                  '*** TensorStack: Only limited referencing styles are supported. Permuted dimensions cannot be linearly indexed.');
-         end
-
-         % - Forbid wrapped-up dimensions before the concatenation dimension
-         nLastStackDim = find(oStack.vnSplitDims == oStack.nStackDim, 1, 'last');
-         if (nNumDims < nRefNumDims) && (nNumDims <= nLastStackDim)
-            error('TensorStack:badsubscript', ...
-                  '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
-                  oStack.nStackDim);
-         end
-
-         % - Check stack references
-         if any(cellfun(@max, coSubs(~vbIsColon)) > vnWrappedTensorSize(~vbIsColon))
-            error('TensorStack:badsubscript', ...
-                  '*** TensorStack: Index exceeds matrix dimensions.');
-         end
-
-         % - Permute data size and indices
-         vnInvOrder(oStack.vnDimsOrder(1:nNumDims)) = 1:nNumDims;
-         vnSortedSize = vnDataSize(vnInvOrder);
-         cSortedSubs = coSubs(vnInvOrder);
-
-         % - Merge split dimensions
-         nNOrigDims = numel(unique(oStack.vnSplitDims(1:nNumDims)));
-         vnMergedSize = zeros(1, nNOrigDims);
-         cMergedSubs = cell(1, nNOrigDims);
-
-         for ii=1:nNOrigDims
-            % number of retrieved elements in the original (merged) dimension
-            vbDimMask = oStack.vnSplitDims(1:nNumDims) == ii;
-            vnDimSortedSize = vnSortedSize(vbDimMask);
-            vnMergedSize(ii) = prod(vnDimSortedSize);
-
-            % indices in the original (merged) dimension
-            cDimSubs = cSortedSubs(vbDimMask);
-            if numel(cDimSubs) == 1
-               cMergedSubs{ii} = cDimSubs{1};
-            elseif all(cellfun(@iscolon, cDimSubs))
-               cMergedSubs{ii} = ':';
-            else
-               vnDimIndices = reshape(1:oStack.vnOrigSize(ii), ...
-                  oStack.vnSplitSize(vbDimMask));
-               cMergedSubs{ii} = reshape(vnDimIndices(cDimSubs{:}), [], 1);
-            end
-         end
-
-         % - Retrieve data from sub-tensors, reshape and permute it
-         tfData = oStack.retrieve_part(cMergedSubs, vnMergedSize);
-         tfData = reshape(tfData, vnSortedSize);
-         tfData = permute(tfData, oStack.vnDimsOrder(1:nNumDims));
-      end
-
-      % retrieve_part - Retrieve part of the stack, using original size
-      function [tfData] = retrieve_part(oStack, cSubs, vnDataSize)
-         % - Allocate return tensor, using buffered data class
-         tfData = zeros(vnDataSize, oStack.strDataClass);
-
-         % - Loop over sub-tensors, referencing them in turn
-         nStackStart = 1;
-         nCurrentIdx = 1;
-
-         for nSubTensor=1:numel(oStack.ctTensors)
-            nNCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
-            nStackEnd = nStackStart + nNCatDim - 1;
-
-            % - Check if the whole concatenated dimension is retrieved
-            if iscolon(cSubs{oStack.nStackDim})
-               cTensorSubs = cSubs;
-               nElements = nNCatDim;
-
-            else
-               % - Work out which indices are within this tensor
-               vbThisTensor = ...
-                  (cSubs{oStack.nStackDim} >= nStackStart) & ...
-                  (cSubs{oStack.nStackDim} <= nStackEnd);
-               nElements = nnz(vbThisTensor);
-
-               % - Map tensor subscripts
-               cTensorSubs = cSubs;
-               cTensorSubs{oStack.nStackDim} = ...
-                  cSubs{oStack.nStackDim}(vbThisTensor) - nStackStart + 1;
-            end
-
-            if nElements > 0
-               % - Map data subscripts
-               cDataSubs = repmat({':'}, 1, numel(cSubs));
-               cDataSubs{oStack.nStackDim} = ...
-                   nCurrentIdx:(nCurrentIdx + nElements - 1);
-
-               % - Access sub-tensor data
-               tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
-            end
-
-            nStackStart = nStackEnd + 1;
-            nCurrentIdx = nCurrentIdx + nElements;
-         end
-      end
-
-      % retrieve_all - Retrieve all data from the stack
-      function [tfData] = retrieve_all(oStack)
-         % - Allocate return tensor, using buffered data class
-         tfData = zeros(oStack.vnOrigSize, oStack.strDataClass);
-
-         % - Loop over sub-tensors, referencing them in turn
-         nCurrentIdx = 1;
-         cTensorSubs = repmat({':'}, 1, ndims(oStack));
-
-         for nSubTensor=1:numel(oStack.ctTensors)
-            nCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
-
-            % - Map data subscripts
-            cDataSubs = cTensorSubs;
-            cDataSubs{oStack.nStackDim} = ...
-               nCurrentIdx:(nCurrentIdx + nCatDim - 1);
-
-            % - Access sub-tensor data
-            tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
-
-            nCurrentIdx = nCurrentIdx + nCatDim;
-         end
-
-         % - Reshape (split) and permute dimensions
-         tfData = reshape(tfData, oStack.vnSplitSize);
-         tfData = permute(tfData, oStack.vnDimsOrder);
-      end
-
 
       %% -- Overloaded size, numel, end, etc
 
@@ -537,8 +376,171 @@ classdef TensorStack
          bIsNan = false;
       end
    end
-   
-   
+
+   methods (Access = private)
+      %% -- Helping methods to index and retrieve data from the stack
+
+      % my_subsref - Standard array referencing
+      function [tfData] = my_subsref(oStack, S)
+         % - Retrieving stack size information
+         vnRefTensorSize = size(oStack);
+         nRefNumDims = numel(vnRefTensorSize);
+
+         % - Cleaning input indices (colon or linear indices)
+         coSubs = cleansubs(S.subs, vnRefTensorSize);
+         nNumDims = numel(coSubs);
+         vbIsColon = cellfun(@iscolon, coSubs);
+
+         % - Output data size, taking into accound wrapped-up tensor dimensions
+         vnWrappedTensorSize = vnRefTensorSize(1:nNumDims);
+         vnWrappedTensorSize(nNumDims) = prod(vnRefTensorSize(nNumDims:end));
+         vnDataSize = vnWrappedTensorSize;
+         vnDataSize(~vbIsColon) = cellfun(@nnz, coSubs(~vbIsColon));
+
+         % - Catch "all colon" entire stack referencing
+         if all(vbIsColon)
+            tfData = oStack.retrieve_all();
+            tfData = reshape(tfData, [vnDataSize, 1]);
+            return
+         end
+
+         % - Catch empty reference
+         if (prod(vnDataSize) == 0)
+            tfData = zeros(vnDataSize, oStack.strDataClass);
+            return;
+         end
+
+         % - Forbid wrapped-up dimensions for permuted dimensions
+         vbPermutedDims = 1:numel(oStack.vnDimsOrder) ~= oStack.vnDimsOrder;
+         if (nNumDims < nRefNumDims) && any(vbPermutedDims(nNumDims:end))
+            error('TensorStack:badsubscript', ...
+                  '*** TensorStack: Only limited referencing styles are supported. Permuted dimensions cannot be linearly indexed.');
+         end
+
+         % - Forbid wrapped-up dimensions before the concatenation dimension
+         nLastStackDim = find(oStack.vnSplitDims == oStack.nStackDim, 1, 'last');
+         if (nNumDims < nRefNumDims) && (nNumDims <= nLastStackDim)
+            error('TensorStack:badsubscript', ...
+                  '*** TensorStack: Only limited referencing styles are supported. The concatenated stack dimension [%d] must be referenced independently.', ...
+                  oStack.nStackDim);
+         end
+
+         % - Check stack references
+         if any(cellfun(@max, coSubs(~vbIsColon)) > vnWrappedTensorSize(~vbIsColon))
+            error('TensorStack:badsubscript', ...
+                  '*** TensorStack: Index exceeds matrix dimensions.');
+         end
+
+         % - Permute data size and indices
+         vnInvOrder(oStack.vnDimsOrder(1:nNumDims)) = 1:nNumDims;
+         vnSortedSize = vnDataSize(vnInvOrder);
+         cSortedSubs = coSubs(vnInvOrder);
+
+         % - Merge split dimensions
+         nNOrigDims = numel(unique(oStack.vnSplitDims(1:nNumDims)));
+         vnMergedSize = zeros(1, nNOrigDims);
+         cMergedSubs = cell(1, nNOrigDims);
+
+         for ii=1:nNOrigDims
+            % number of retrieved elements in the original (merged) dimension
+            vbDimMask = oStack.vnSplitDims(1:nNumDims) == ii;
+            vnDimSortedSize = vnSortedSize(vbDimMask);
+            vnMergedSize(ii) = prod(vnDimSortedSize);
+
+            % indices in the original (merged) dimension
+            cDimSubs = cSortedSubs(vbDimMask);
+            if numel(cDimSubs) == 1
+               cMergedSubs{ii} = cDimSubs{1};
+            elseif all(cellfun(@iscolon, cDimSubs))
+               cMergedSubs{ii} = ':';
+            else
+               vnDimIndices = reshape(1:oStack.vnOrigSize(ii), ...
+                  oStack.vnSplitSize(vbDimMask));
+               cMergedSubs{ii} = reshape(vnDimIndices(cDimSubs{:}), [], 1);
+            end
+         end
+
+         % - Retrieve data from sub-tensors, reshape and permute it
+         tfData = oStack.retrieve_part(cMergedSubs, vnMergedSize);
+         tfData = reshape(tfData, vnSortedSize);
+         tfData = permute(tfData, oStack.vnDimsOrder(1:nNumDims));
+      end
+
+      % retrieve_part - Retrieve part of the stack, using original size
+      function [tfData] = retrieve_part(oStack, cSubs, vnDataSize)
+         % - Allocate return tensor, using buffered data class
+         tfData = zeros(vnDataSize, oStack.strDataClass);
+
+         % - Loop over sub-tensors, referencing them in turn
+         nStackStart = 1;
+         nCurrentIdx = 1;
+
+         for nSubTensor=1:numel(oStack.ctTensors)
+            nNCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
+            nStackEnd = nStackStart + nNCatDim - 1;
+
+            % - Check if the whole concatenated dimension is retrieved
+            if iscolon(cSubs{oStack.nStackDim})
+               cTensorSubs = cSubs;
+               nElements = nNCatDim;
+
+            else
+               % - Work out which indices are within this tensor
+               vbThisTensor = ...
+                  (cSubs{oStack.nStackDim} >= nStackStart) & ...
+                  (cSubs{oStack.nStackDim} <= nStackEnd);
+               nElements = nnz(vbThisTensor);
+
+               % - Map tensor subscripts
+               cTensorSubs = cSubs;
+               cTensorSubs{oStack.nStackDim} = ...
+                  cSubs{oStack.nStackDim}(vbThisTensor) - nStackStart + 1;
+            end
+
+            if nElements > 0
+               % - Map data subscripts
+               cDataSubs = repmat({':'}, 1, numel(cSubs));
+               cDataSubs{oStack.nStackDim} = ...
+                   nCurrentIdx:(nCurrentIdx + nElements - 1);
+
+               % - Access sub-tensor data
+               tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
+            end
+
+            nStackStart = nStackEnd + 1;
+            nCurrentIdx = nCurrentIdx + nElements;
+         end
+      end
+
+      % retrieve_all - Retrieve all data from the stack
+      function [tfData] = retrieve_all(oStack)
+         % - Allocate return tensor, using buffered data class
+         tfData = zeros(oStack.vnOrigSize, oStack.strDataClass);
+
+         % - Loop over sub-tensors, referencing them in turn
+         nCurrentIdx = 1;
+         cTensorSubs = repmat({':'}, 1, ndims(oStack));
+
+         for nSubTensor=1:numel(oStack.ctTensors)
+            nCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
+
+            % - Map data subscripts
+            cDataSubs = cTensorSubs;
+            cDataSubs{oStack.nStackDim} = ...
+               nCurrentIdx:(nCurrentIdx + nCatDim - 1);
+
+            % - Access sub-tensor data
+            tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
+
+            nCurrentIdx = nCurrentIdx + nCatDim;
+         end
+
+         % - Reshape (split) and permute dimensions
+         tfData = reshape(tfData, oStack.vnSplitSize);
+         tfData = permute(tfData, oStack.vnDimsOrder);
+      end
+   end
+
 end
 
 %% -- Helper functions
