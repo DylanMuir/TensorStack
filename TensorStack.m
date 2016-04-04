@@ -70,7 +70,10 @@ classdef TensorStack
          % - Buffer tensor sizes
          oStack.nStackDim = varargin{1};
          oStack.cvnTensorSizes = cellfun(@size, varargin(2:end), 'UniformOutput', false);
-
+         
+         % - Add unitary dimensions out to concatenation dimension
+         oStack.cvnTensorSizes = cellfun(@(c)[c ones(1, oStack.nStackDim - numel(c))], oStack.cvnTensorSizes, 'UniformOutput', false);
+         
          % - Check dimension argument
          if (~isnumeric(oStack.nStackDim) || (oStack.nStackDim < 1))
             error('TensorStack:Arguments', ...

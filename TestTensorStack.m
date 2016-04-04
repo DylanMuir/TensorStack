@@ -194,5 +194,31 @@ classdef TestTensorStack < matlab.unittest.TestCase
             rstack = reshape(testCase.stack, [1, 1, 1, 3, 12, 5]);
             testCase.verifyError(@() rstack(:, :, :, 3), 'TensorStack:badsubscript');
         end
+        
+        % test creation of a stack with unequal sizes
+        function testUnequalSizes(testCase)
+           testCase.verifyError(@()TensorStack(1, ones(2, 1), ones(2, 2)), 'TensorStack:Arguments');
+        end
+        
+        % test creation of a stack with different classes
+        function testDifferentClasses(testCase)
+           testCase.verifyError(@()TensorStack(1, ones(2, 1, 'double'), ones(2, 1, 'uint16')), 'TensorStack:Arguments');
+        end
+        
+       % test incorrect creation arguments
+       function testInvalidArgument(testCase)
+          testCase.verifyError(@()TensorStack(0, 1, 1), 'TensorStack:Arguments');
+       end
+       
+       % test invalid referencing
+       function testInvalidRefs(testCase)
+          testCase.verifyError(@()testCase.stack{1}, 'TensorStack:InvalidReferencing');
+          testCase.verifyError(@()testCase.stack.a, 'TensorStack:InvalidReferencing');
+       end
+       
+       % test that subsasgn fails
+       function testAssignUnsupported(testCase)
+          testCase.verifyError(@()subsasgn(testCase.stack, 1, 1), 'TensorStack:NotSupported');
+       end
     end
 end
