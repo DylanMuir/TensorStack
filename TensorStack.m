@@ -220,14 +220,14 @@ classdef TensorStack
       function [oStack] = permute(oStack, vnNewOrder)
          % - Test permutation indices
          vnTestedOrder = sort(vnNewOrder(:));
-         nNDims = numel(oStack.vnDimsOrder);
+         nNumDims = numel(oStack.vnDimsOrder);
 
          try
             validateattributes(vnTestedOrder, {'numeric'}, ...
-                {'positive', 'integer', 'numel', nNDims, 'increasing', '<=', nNDims});
+                {'positive', 'integer', 'numel', nNumDims, 'increasing', '<=', nNumDims});
          catch
-            error('TensorStack:badorder', ...
-                  '*** TensorStack: invalid permutation indices');
+            error('TensorStack:permute:badIndex', ...
+                  '*** TensorStack/permute: invalid permutation indices');
          end
 
          % - Change dimensions order
@@ -398,7 +398,7 @@ classdef TensorStack
          vnDataSize(~vbIsColon) = cellfun(@nnz, coSubs(~vbIsColon));
 
          % - Catch "all colon" entire stack referencing
-         if all(vbIsColon)
+         if (all(vbIsColon))
             tfData = oStack.retrieve_all();
             tfData = reshape(tfData, [vnDataSize, 1]);
             return
@@ -437,26 +437,26 @@ classdef TensorStack
          cSortedSubs = coSubs(vnInvOrder);
 
          % - Merge split dimensions
-         nNOrigDims = numel(unique(oStack.vnSplitDims(1:nNumDims)));
-         vnMergedSize = zeros(1, nNOrigDims);
-         cMergedSubs = cell(1, nNOrigDims);
+         nNumOrigDims = numel(unique(oStack.vnSplitDims(1:nNumDims)));
+         vnMergedSize = zeros(1, nNumOrigDims);
+         cMergedSubs = cell(1, nNumOrigDims);
 
-         for ii=1:nNOrigDims
-            % number of retrieved elements in the original (merged) dimension
-            vbDimMask = oStack.vnSplitDims(1:nNumDims) == ii;
+         for (nDimIndex = 1:nNumOrigDims)
+            % - Number of retrieved elements in the original (merged) dimension
+            vbDimMask = oStack.vnSplitDims(1:nNumDims) == nDimIndex;
             vnDimSortedSize = vnSortedSize(vbDimMask);
-            vnMergedSize(ii) = prod(vnDimSortedSize);
+            vnMergedSize(nDimIndex) = prod(vnDimSortedSize);
 
-            % indices in the original (merged) dimension
+            % - Indices in the original (merged) dimension
             cDimSubs = cSortedSubs(vbDimMask);
             if numel(cDimSubs) == 1
-               cMergedSubs{ii} = cDimSubs{1};
+               cMergedSubs{nDimIndex} = cDimSubs{1};
             elseif all(cellfun(@iscolon, cDimSubs))
-               cMergedSubs{ii} = ':';
+               cMergedSubs{nDimIndex} = ':';
             else
-               vnDimIndices = reshape(1:oStack.vnOrigSize(ii), ...
+               vnDimIndices = reshape(1:oStack.vnOrigSize(nDimIndex), ...
                   oStack.vnSplitSize(vbDimMask));
-               cMergedSubs{ii} = reshape(vnDimIndices(cDimSubs{:}), [], 1);
+               cMergedSubs{nDimIndex} = reshape(vnDimIndices(cDimSubs{:}), [], 1);
             end
          end
 
@@ -521,7 +521,7 @@ classdef TensorStack
          nCurrentIdx = 1;
          cTensorSubs = repmat({':'}, 1, ndims(oStack));
 
-         for nSubTensor=1:numel(oStack.ctTensors)
+         for (nSubTensor = 1:numel(oStack.ctTensors))
             nCatDim = oStack.cvnTensorSizes{nSubTensor}(oStack.nStackDim);
 
             % - Map data subscripts
@@ -532,6 +532,7 @@ classdef TensorStack
             % - Access sub-tensor data
             tfData(cDataSubs{:}) = oStack.ctTensors{nSubTensor}(cTensorSubs{:});
 
+            % - Move to next sub-tensor
             nCurrentIdx = nCurrentIdx + nCatDim;
          end
 
@@ -591,12 +592,14 @@ function coCleanSubs = cleansubs(coSubs, vnTensorSize)
     coCleanSubs = coSubs(1:min(numel(coSubs), nNumDims));
 
     % - Convert logical indices to linear indices
-    for ii=1:numel(coCleanSubs)
-       if islogical(coCleanSubs{ii})
-           coCleanSubs{ii} = find(coCleanSubs{ii});
+    for (nSubsDim = 1:numel(coCleanSubs))
+       if (islogical(coCleanSubs{nSubsDim}))
+           coCleanSubs{nSubsDim} = find(coCleanSubs{nSubsDim});
        end
     end
 
     % - Flatten indices arrays
-    coCleanSubs = cellfun(@(c) c(:), coCleanSubs, 'un', false);
+    coCleanSubs = cellfun(@(c) c(:), coCleanSubs, 'UniformOutput', false);
 end
+
+% --- END of TensorStack.m ---
