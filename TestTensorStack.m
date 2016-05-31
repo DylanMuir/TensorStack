@@ -41,7 +41,7 @@ classdef TestTensorStack < matlab.unittest.TestCase
             'unknown3', {{[], 2, 6, 5}}, ...
             'dummy1', [3, 12, 5, 1], ...
             'dummy2', [3, 12, 1, 5], ...
-            'dummy3', [3, 1, 1, 1, 12 5], ...
+            'dummy3', [3, 1, 1, 1, 12, 5], ...
             'split1', [3, 2, 6, 5], ...
             'split2', [3, 3, 4, 5], ...
             'split3', [3, 4, 3, 5], ...
@@ -177,6 +177,17 @@ classdef TestTensorStack < matlab.unittest.TestCase
             psubs = splitsubs(rorder);
 
             testCase.verifyEqual(pstack(psubs{:}), preal(psubs{:}));
+        end
+
+        % test indexing with dummy dimension removed after permutation
+        function testRemovedDummySubsref(testCase, subs)
+            rstack = reshape(testCase.stack, [3, 12, 1, 5]);
+            rreal = reshape(testCase.real_stack, [3, 12, 1, 5]);
+
+            pstack = permute(rstack, [1, 2, 4, 3]);
+            preal = permute(rreal, [1, 2, 4, 3]);
+
+            testCase.verifyEqual(pstack(subs{:}), preal(subs{:}));
         end
 
         % test limited linear indexing
