@@ -29,7 +29,10 @@ classdef TestTensorStack < matlab.unittest.TestCase
             'reverse', [3, 2, 1], ...
             'invert1', [2, 1, 3], ...
             'invert2', [1, 3, 2], ...
-            'shuffle', [2, 3, 1]);
+            'shuffle', [2, 3, 1], ...
+            'moredims1', [4, 1, 2, 3], ...
+            'moredims2', [3, 4, 1, 2], ...
+            'moredims3', [4, 1, 5, 2, 3]);
         % tested new sizes for reshaping (split only)
         newsize = struct( ...
             'unchanged', [3, 12, 5], ...
@@ -83,12 +86,14 @@ classdef TestTensorStack < matlab.unittest.TestCase
             pstack = permute(testCase.stack, order);
             preal = permute(testCase.real_stack, order);
             testCase.verifySize(pstack, size(preal));
-            testCase.verifyEqual(pstack(:, :, :), preal);
+            colons = repmat({':'}, ndims(preal), 1);
+            testCase.verifyEqual(pstack(colons{:}), preal);
 
             % restore original order
             ppstack = ipermute(pstack, order);
             testCase.verifySize(ppstack, size(testCase.real_stack));
-            testCase.verifyEqual(ppstack(:, :, :), testCase.real_stack);
+            colons = repmat({':'}, ndims(testCase.real_stack), 1);
+            testCase.verifyEqual(ppstack(colons{:}), testCase.real_stack);
         end
         
         % test reshaping
