@@ -223,10 +223,7 @@ classdef TensorStack
       function [oStack] = permute(oStack, vnNewOrder)
          % - Test permutation indices
          vnTestedOrder = sort(vnNewOrder(:));
-
-         nMaxOldDims = numel(oStack.vnDimsOrder);
-         nMaxNewDims = max(vnNewOrder);
-         nNumDims = max(nMaxOldDims, nMaxNewDims);
+         nNumDims = numel(oStack.vnDimsOrder);
 
          try
             validateattributes(vnTestedOrder, {'numeric'}, ...
@@ -234,13 +231,6 @@ classdef TensorStack
          catch
             error('TensorStack:permute:badIndex', ...
                   '*** TensorStack/permute: invalid permutation indices');
-         end
-
-         % - Add dummy dimensions if necessary
-         for ii=(nMaxOldDims+1):nNumDims
-             oStack.vnSplitSize(ii) = 1;
-             oStack.vnSplitDims(ii) = oStack.vnSplitDims(end);
-             oStack.vnDimsOrder(ii) = ii;
          end
 
          % - Change dimensions order
