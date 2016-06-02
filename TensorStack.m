@@ -444,6 +444,15 @@ classdef TensorStack
                   '*** TensorStack: Index exceeds matrix dimensions.');
          end
 
+         % - Deal with unshown trailing dimensions adding them back
+         vnAllSize = oStack.vnSplitSize(oStack.vnDimsOrder);
+         vnTrailingDims = find(vnAllSize == 1);
+         nTrailingDims = sum(vnTrailingDims > find(vnAllSize ~= 1, 1, 'last'));
+
+         nNumDims = nNumDims + nTrailingDims;
+         coSubs(end+1:end+nTrailingDims) = {':'};
+         vnDataSize(end+1:end+nTrailingDims) = 1;
+
          % - Permute data size and indices
          vnInvOrder(oStack.vnDimsOrder(1:nNumDims)) = 1:nNumDims;
          vnSortedSize = vnDataSize(vnInvOrder);
